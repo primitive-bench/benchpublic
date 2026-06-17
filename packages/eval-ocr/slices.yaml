@@ -1,0 +1,5 @@
+# Slice / constraint definitions for the ocr primitive.
+# Each slice becomes a SliceResult per adapter. ~45 slices total across primitives.
+# Trust rule: a slice only publishes a winner if adapters are statistically separable.
+primitive: ocr
+slices: []   # TODO: define per-constraint slices (the "one winner is a lie" surface)

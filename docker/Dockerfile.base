@@ -1,0 +1,20 @@
+# Base image for deterministic Primitive Bench runs.
+# Per-primitive images (e.g. eval-vectordb engines) extend this — the
+# ann-benchmarks pattern: one container per algorithm/engine, pinned versions.
+FROM python:3.11-slim
+
+# uv for fast, reproducible installs.
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+ENV UV_SYSTEM_PYTHON=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONHASHSEED=0
+
+WORKDIR /bench
+
+COPY pyproject.toml uv.lock* ./
+COPY packages ./packages
+RUN uv sync --all-packages --frozen || uv sync --all-packages
+
+ENTRYPOINT ["uv", "run", "benchpublic"]
+CMD ["--help"]

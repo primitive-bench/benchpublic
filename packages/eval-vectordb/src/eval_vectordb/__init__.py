@@ -1,0 +1,14 @@
+"""eval-vectordb — Primitive Bench vertical.
+
+Vector DB / ANN — Dockerized per-engine, recall-vs-QPS slices
+
+Implements bench_core.Task + bench_core.Scorer for this primitive. The public
+golden DEV split lives in golden-sets-public/vectordb/; the held-out test split lives
+only behind the private eval server. Slice definitions: slices.yaml.
+
+STATUS: scaffold. Cloned from eval-ocr once the OCR loop proves end-to-end.
+"""
+
+from eval_vectordb.task import Task
+
+__all__ = ["Task"]

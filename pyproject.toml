@@ -1,0 +1,24 @@
+[project]
+name = "benchpublic"
+version = "0.1.0"
+description = "Vendor-neutral, reproducible eval harness for AI infrastructure primitives."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+
+# uv workspace — every package under packages/* and apps/* is a member.
+[tool.uv.workspace]
+members = ["packages/*", "apps/cli"]
+
+[tool.uv.sources]
+bench-schemas = { workspace = true }
+bench-core = { workspace = true }
+bench-stats = { workspace = true }
+bench-adapters = { workspace = true }
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.pytest.ini_options]
+testpaths = ["packages", "apps"]
