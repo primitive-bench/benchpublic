@@ -1,5 +1,65 @@
 # Slice / constraint definitions for the extraction primitive.
-# Each slice becomes a SliceResult per adapter. ~45 slices total across primitives.
-# Trust rule: a slice only publishes a winner if adapters are statistically separable.
+# Ported from arlenk2021/GoldenEvalsWebSearch (src/slices.py taxonomy + the extract
+# probe's per-source token-survival report). web_extraction and web_search share
+# ONE slice vocabulary and ONE stratum set — that is intentional: a golden row is
+# probed by both primitives, so a slice means the same thing on either board.
+#
+# Each slice becomes a SliceResult per adapter. Trust rule: a slice only publishes
+# a winner if adapters are statistically separable (its Wilson interval must clear
+# the runner-up's; otherwise a TIE band).
 primitive: extraction
-slices: []   # TODO: define per-constraint slices (the "one winner is a lie" surface)
+
+# Token-survival is whitespace-normalized substring; FR doc numbers / CVE IDs /
+# SEC accession numbers are exact strings. A miss is decomposed so an anti-bot
+# wall is never charged as an extraction failure (see scoring.classify_miss).
+scoring:
+  metric: token_survival          # hit = truth_token survives extraction
+  match: normalized_substring
+  miss_reasons: [blocked, truncated, token_absent, empty]
+
+# Strata = the GoldenEvals row contract's difficulty kind (NOT a topic). Maps onto
+# the frozen GroundTruthTier via bench_core.domain.stratum_to_tier.
+strata: [navigational, long_tail, fresh, sentinel, sos]
+
+# Cross-cutting intent slices (the canonical GoldenEvals vocabulary). A row may
+# carry several; assigned deterministically from source + content rules (no model).
+slices:
+  - key: government_registry
+    description: "Gov / registry pages (SEC, Federal Register, NVD)."
+    separates: "anti-bot evasion on institutional sites — THE Exa story (~33% on FR; 98/100 misses blocked, not token_absent)"
+  - key: company_lookup
+    description: "Startup / company lookup (SEC filings ARE a company lookup)."
+    separates: "long-document extraction fidelity"
+  - key: technical_docs
+    description: "Technical documentation / specs (NVD records, GitHub releases)."
+    separates: "title-zone survival (saturates) vs deep extraction"
+  - key: docs_lookup
+    description: "General docs lookup."
+    separates: "broad doc extraction"
+  - key: fresh_news
+    description: "Time-sensitive news / events."
+    separates: "freshness — but instrumented so freshness lag is not misread as a miss"
+  - key: b2b_tools
+    description: "Obscure B2B tools / vendors (API/SDK/integration pages)."
+    separates: "tail-site robustness"
+  - key: local_regional
+    description: "Local / regional sources."
+    separates: "non-canonical layout handling"
+  - key: pricing_pages
+    description: "Pricing / plans pages."
+    separates: "ambiguous-node disambiguation"
+  - key: long_tail
+    description: "Rare, low-traffic queries."
+    separates: "tail coverage"
+  - key: citation_needed
+    description: "Claims needing an authoritative citation (the canonical FR/SEC/NVD source)."
+    separates: "authoritative-source token survival"
+
+# Token-depth slice (depth-conditional survival, see scoring.token_locate).
+# Separates snippet-only extractors that look good on title-zone tokens (CVE IDs,
+# offset ~0) from those that survive deep-body tokens (FR doc numbers).
+token_depth_slices:
+  - key: token_depth:title_zone
+    description: "Truth token sits at offset ~0 (title/URL); survives any truncation."
+  - key: token_depth:deep_body
+    description: "Truth token sits deep in the body; dies under truncation."

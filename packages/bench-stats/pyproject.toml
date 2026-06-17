@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Statistics library for Primitive Bench (McNemar, Wilson, bootstrap, IR metrics)"
 requires-python = ">=3.11"
 license = { text = "MIT" }
-dependencies = ["bench-schemas"]
+dependencies = ["bench-schemas", "scipy", "statsmodels"]
 
 [build-system]
 requires = ["hatchling"]

@@ -14,7 +14,9 @@ Contract surface (v0.1.0):
 
 from bench_schemas.models import (
     AdapterSpec,
+    GroundTruthTier,
     ItemResult,
+    Primitive,
     RunManifest,
     ScorerOutput,
     SliceResult,
@@ -24,7 +26,9 @@ from bench_schemas.models import (
 
 __all__ = [
     "AdapterSpec",
+    "GroundTruthTier",
     "ItemResult",
+    "Primitive",
     "RunManifest",
     "ScorerOutput",
     "SliceResult",

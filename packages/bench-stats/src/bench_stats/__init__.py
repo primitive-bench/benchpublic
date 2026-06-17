@@ -10,13 +10,31 @@ SliceResult, and the `separable` trust gate the leaderboard depends on.
   ndcg_at_k / map_at_k / mrr_at_k  — BEIR/MTEB-standard IR metrics
   separable(...)      — McNemar-based separability decision for two adapters on a slice
 
-Implementations are stubs in v0.1.0 — signatures are frozen against bench-schemas
-so downstream lanes can code against them. See DECISIONS.md D-04.
+Richer reporting helpers (scipy/statsmodels-backed, ported from
+arlenk2021/GoldenEvalsWebSearch) live in `bench_stats.reporting`:
+
+  mcnemar_pair(...)   — paired McNemar (exact binomial < 25 discordant, else corrected)
+  mcnemar_power(...)  — Connor 1987 power approximation for sizing from a pilot
+  required_n(...)     — smallest n reaching target power for McNemar
+  cmh_global(...)     — Cochran–Mantel–Haenszel omnibus across vendors/strata
+  cusum(...)          — one-sided CUSUM for drift/regression on an anchor set
+  tied_rank_band(...) — name a winner only when its Wilson interval clears the runner-up's
+
+The proportions/resampling/retrieval modules stay scipy-free; only `reporting`
+pulls in scipy/statsmodels. See DECISIONS.md D-04.
 """
 
 from bench_stats.proportions import mcnemar, wilson, separable
 from bench_stats.resampling import bootstrap_ci
 from bench_stats.retrieval import hit_at_k, ndcg_at_k, map_at_k, mrr_at_k
+from bench_stats.reporting import (
+    mcnemar_pair,
+    mcnemar_power,
+    required_n,
+    cmh_global,
+    cusum,
+    tied_rank_band,
+)
 
 __all__ = [
     "mcnemar",
@@ -27,4 +45,10 @@ __all__ = [
     "ndcg_at_k",
     "map_at_k",
     "mrr_at_k",
+    "mcnemar_pair",
+    "mcnemar_power",
+    "required_n",
+    "cmh_global",
+    "cusum",
+    "tied_rank_band",
 ]
