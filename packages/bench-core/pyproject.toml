@@ -4,7 +4,16 @@ version = "0.1.0"
 description = "Harness engine for Primitive Bench"
 requires-python = ">=3.11"
 license = { text = "MIT" }
-dependencies = ["bench-schemas"]
+dependencies = [
+    "bench-schemas",
+    "httpx[http2]>=0.27",        # async HTTP client (registry pump + liveness fetch)
+    "selectolax>=0.3.21",        # fast HTML main-content extraction for truth-token checks
+    "w3lib>=2.1",                # URL canonicalization (from the Scrapy project)
+    "tldextract>=5.2",           # registrable-domain extraction
+    "python-dotenv>=1.0",        # .env loading for Settings
+    "pydantic>=2.8",
+    "pydantic-settings>=2.4",    # env-backed typed config
+]
 
 [build-system]
 requires = ["hatchling"]

@@ -1,5 +1,33 @@
 # Slice / constraint definitions for the websearch primitive.
-# Each slice becomes a SliceResult per adapter. ~45 slices total across primitives.
-# Trust rule: a slice only publishes a winner if adapters are statistically separable.
+# Each slice becomes a SliceResult per adapter.
+# A **slice** is a cross-cutting query-intent tag, orthogonal to `stratum`
+# (difficulty) and `source` (registry). Slices turn one leaderboard into many:
+# "Exa wins company_lookup, exa/serpapi tie government_registry".
+# Trust rule: a slice only publishes a winner if its Wilson interval clears the
+# runner-up's (bench_stats.tied_rank_band) — otherwise a TIE band.
+#
+# Assignment is deterministic and frozen with the row (eval_websearch.slices.assign_slices):
+# per-source defaults + conservative content keyword rules + a long-tail proxy.
 primitive: websearch
-slices: []   # TODO: define per-constraint slices (the "one winner is a lie" surface)
+metric: "hit@5"        # descriptive form (the honest discriminator)
+slices:
+  - name: company_lookup
+    desc: startup / company lookup (SEC filings ARE a company lookup)
+  - name: government_registry
+    desc: gov / registry pages of record
+  - name: citation_needed
+    desc: claims needing an authoritative citation
+  - name: technical_docs
+    desc: technical documentation / specs (NVD records, release notes)
+  - name: fresh_news
+    desc: time-sensitive news / events
+  - name: pricing_pages
+    desc: pricing / plans pages
+  - name: b2b_tools
+    desc: obscure B2B tools / vendors (API / SDK / integration queries)
+  - name: docs_lookup
+    desc: general docs lookup
+  - name: navigational
+    desc: direct, known-item navigational lookups (official site / homepage / login)
+  - name: long_tail
+    desc: rare, low-traffic queries (short, specific descriptive query proxy)
