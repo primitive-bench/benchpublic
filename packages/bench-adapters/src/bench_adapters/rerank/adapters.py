@@ -19,6 +19,7 @@ inside a vendor's free tier — so the leaderboard's cost dimension stays honest
 from __future__ import annotations
 
 import os
+import random
 import time
 from typing import Any
 
@@ -28,6 +29,34 @@ from bench_adapters.registry import Adapter, register
 from bench_adapters.rerank import pricing
 
 RERANK_TIMEOUT = 60.0
+
+_RETRY_STATUS = {429, 500, 502, 503, 504}
+RERANK_MAX_ATTEMPTS = 7
+_MAX_BACKOFF = 30.0
+
+
+def _post_json_with_retry(client: httpx.Client, url: str, headers: dict[str, str],
+                          payload: dict[str, Any]) -> dict[str, Any]:
+    """POST with exponential backoff on 429/5xx, honoring Retry-After when present."""
+    last: httpx.Response | None = None
+    for attempt in range(RERANK_MAX_ATTEMPTS):
+        r = client.post(url, headers=headers, json=payload)
+        if r.status_code in _RETRY_STATUS and attempt < RERANK_MAX_ATTEMPTS - 1:
+            last = r
+            ra = r.headers.get("retry-after")
+            try:
+                wait = float(ra) if ra else 0.0
+            except ValueError:
+                wait = 0.0
+            if wait <= 0:
+                wait = min(_MAX_BACKOFF, (2 ** attempt) + random.random())
+            time.sleep(wait)
+            continue
+        r.raise_for_status()
+        return r.json()
+    assert last is not None
+    last.raise_for_status()
+    return {}
 
 
 class VendorUnavailable(Exception):
@@ -169,10 +198,8 @@ class _ApiReranker(_RerankAdapter):
         key = _need(_env(*self.key_envs), self.name)
         docs = [str(c.get("text", "")) for c in candidates]
         with httpx.Client(timeout=RERANK_TIMEOUT) as client:
-            r = client.post(self.endpoint, headers=self._headers(key),
-                            json=self._payload(query, docs))
-            r.raise_for_status()
-            data = r.json()
+            data = _post_json_with_retry(client, self.endpoint,
+                                         self._headers(key), self._payload(query, docs))
         results = self._results(data)
         ranked = sorted(results, key=lambda d: -float(d.get("relevance_score", 0.0)))
         order = [int(d["index"]) for d in ranked if 0 <= int(d.get("index", -1)) < len(candidates)]
