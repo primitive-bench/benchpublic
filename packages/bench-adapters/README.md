@@ -62,3 +62,25 @@ adapted to the synchronous bench-adapters `Adapter.invoke(item)` contract.
 `BrightData` is ported but **not registered** (Web Unlocker zone is
 account-specific and the endpoint 400s without it); kept in the module for
 future use.
+
+## Registered OCR adapters (page image -> transcription)
+
+`invoke(item)` reads `item["image"]` (an absolute path to a page image) and
+returns `{raw_output, text, latency_ms, cost_usd, mode}`. **Prompted VLMs**
+(`claude-sonnet-ocr`, `gpt-ocr`, `gemini-ocr`) share one pinned transcription
+prompt; **native OCR** systems (`tesseract`, `mistral-ocr`, `deepseek-ocr`)
+transcribe with no prompt. Model IDs are env-overridable so model drift never
+needs a code change; the resolved ID is recorded in the run manifest.
+
+| name | vendor | key / requirement (first match wins) | model env override (default) |
+|------|--------|--------------------------------------|------------------------------|
+| `tesseract` | Tesseract (local, sentinel) | system `tesseract` binary (`brew install tesseract`) | — |
+| `claude-sonnet-ocr` | Anthropic (SDK) | `WRODIUM_ANTHROPIC_API_KEY` / `ANTHROPIC_API_KEY` | `CLAUDE_OCR_MODEL` (`claude-sonnet-4-6`) |
+| `gpt-ocr` | OpenAI | `WRODIUM_OPENAI_API_KEY` / `OPENAI_API_KEY` | `GPT_OCR_MODEL` (`gpt-4o`) |
+| `gemini-ocr` | Google | `WRODIUM_GEMINI_API_KEY` / `GEMINI_API_KEY` / `GOOGLE_API_KEY` | `GEMINI_OCR_MODEL` (`gemini-2.5-pro`) |
+| `mistral-ocr` | Mistral (dedicated OCR API) | `WRODIUM_MISTRAL_API_KEY` / `MISTRAL_API_KEY` | `MISTRAL_OCR_MODEL` (`mistral-ocr-latest`) |
+| `deepseek-ocr` | DeepSeek-OCR (self-host) | `DEEPSEEK_OCR_BASE_URL` (vLLM/Ollama OpenAI-compatible endpoint) | `DEEPSEEK_OCR_MODEL` (`deepseek-ocr`) |
+
+DeepSeek-OCR has **no hosted vision API** (as of 2026-06) — it is weights-only, so
+the adapter targets a self-hosted OpenAI-compatible endpoint and is skipped
+(`VendorUnavailable`, uncharged) unless `DEEPSEEK_OCR_BASE_URL` is set.
