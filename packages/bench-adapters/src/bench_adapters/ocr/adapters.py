@@ -42,6 +42,15 @@ class VendorUnavailable(Exception):
     """Raised when a vendor cannot be queried (missing key, missing binary, ...)."""
 
 
+class RateLimited(Exception):
+    """Transient failure (429 / 5xx / timeout) that persisted past retries.
+
+    The runner must NOT checkpoint a page that raised this — it stays *undone* so
+    a later resume retries it (rather than being permanently skipped). Distinct
+    from a terminal miss (refused / truncated / empty), which IS recorded.
+    """
+
+
 def _env(*names: str) -> str:
     for n in names:
         v = os.environ.get(n)
@@ -130,10 +139,34 @@ def _image_b64(path: str, *, max_edge: int = DEFAULT_MAX_EDGE) -> tuple[str, str
     return base64.b64encode(buf.getvalue()).decode("ascii"), "image/png"
 
 
-def _post(url: str, body: dict[str, Any], headers: dict[str, str], timeout: float = 120.0) -> dict:
-    r = httpx.post(url, json=body, headers=headers, timeout=timeout)
-    r.raise_for_status()
-    return r.json()
+def _post(url: str, body: dict[str, Any], headers: dict[str, str], timeout: float = 120.0,
+          max_retries: int = 4) -> dict:
+    """POST JSON with Retry-After-aware backoff on 429/5xx/timeout.
+
+    Raises `RateLimited` once retries are exhausted so the caller leaves the page
+    undone (resumable) rather than recording a bogus miss.
+    """
+    delay = 2.0
+    for attempt in range(max_retries + 1):
+        try:
+            r = httpx.post(url, json=body, headers=headers, timeout=timeout)
+        except (httpx.TimeoutException, httpx.TransportError) as exc:
+            if attempt == max_retries:
+                raise RateLimited(f"transport error after {max_retries} retries: {exc}") from exc
+            time.sleep(delay)
+            delay = min(delay * 2, 30.0)
+            continue
+        if r.status_code == 429 or r.status_code >= 500:
+            if attempt == max_retries:
+                raise RateLimited(f"HTTP {r.status_code} after {max_retries} retries")
+            ra = r.headers.get("retry-after", "")
+            wait = float(ra) if ra.replace(".", "", 1).isdigit() else delay
+            time.sleep(min(wait, 60.0))
+            delay = min(delay * 2, 30.0)
+            continue
+        r.raise_for_status()
+        return r.json()
+    raise RateLimited("unreachable")  # pragma: no cover
 
 
 def _ok(text: str, latency_ms: float, cost: float, mode: str) -> dict[str, Any]:
@@ -157,18 +190,23 @@ class ClaudeOCR(Adapter):
             raise VendorUnavailable(f"anthropic SDK unavailable: {exc}") from exc
         key = _need(_env("WRODIUM_ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY"), "claude-sonnet-ocr")
         b64, mime = _image_b64(str(item.get("image", "")))
-        client = anthropic.Anthropic(api_key=key)
+        client = anthropic.Anthropic(api_key=key, max_retries=4)  # SDK backs off on 429/5xx
+        transient = (anthropic.RateLimitError, anthropic.APITimeoutError,
+                     anthropic.APIConnectionError, anthropic.InternalServerError)
         content = [
             {"type": "image", "source": {"type": "base64", "media_type": mime, "data": b64}},
             {"type": "text", "text": OCR_PROMPT},
         ]
         for max_tok in _MAX_TOKEN_TRIES:
             t0 = time.monotonic()
-            resp = client.messages.create(
-                model=self.model_version, max_tokens=max_tok,
-                thinking={"type": "disabled"},
-                messages=[{"role": "user", "content": content}],
-            )
+            try:
+                resp = client.messages.create(
+                    model=self.model_version, max_tokens=max_tok,
+                    thinking={"type": "disabled"},
+                    messages=[{"role": "user", "content": content}],
+                )
+            except transient as exc:  # leave page undone for resume
+                raise RateLimited(f"anthropic transient: {exc!r}"[:200]) from exc
             latency = (time.monotonic() - t0) * 1000.0
             if resp.stop_reason == "refusal":
                 return {"non_attempt": "refused", "latency_ms": latency}

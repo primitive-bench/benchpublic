@@ -15,7 +15,7 @@ chance at.
 """
 from __future__ import annotations
 
-from bench_adapters.ocr.adapters import OCR_PROMPT, VendorUnavailable
+from bench_adapters.ocr.adapters import OCR_PROMPT, RateLimited, VendorUnavailable
 from bench_adapters.ocr import adapters as adapters  # noqa: F401  (side-effect registration)
 
-__all__ = ["adapters", "OCR_PROMPT", "VendorUnavailable"]
+__all__ = ["adapters", "OCR_PROMPT", "RateLimited", "VendorUnavailable"]
