@@ -39,7 +39,8 @@ def main(argv: list[str] | None = None) -> None:
                     help="comma-separated adapter names")
     ap.add_argument("--limit", type=int, default=None, help="cap the number of test cases")
     ap.add_argument("--reps", type=int, default=1, help="repeats per page (majority vote)")
-    ap.add_argument("--rpm", type=float, default=None, help="pace paid lanes to N requests/min")
+    ap.add_argument("--concurrency", type=int, default=6,
+                    help="parallel in-flight pages per lane (I/O-bound API calls)")
     ap.add_argument("--max-cost", type=float, default=None,
                     help="stop cleanly at this USD spend (resumable)")
     ap.add_argument("--seed", type=int, default=0)
@@ -49,8 +50,8 @@ def main(argv: list[str] | None = None) -> None:
     rows = load_rows(args.dataset)
     vendors = [v.strip() for v in args.vendors.split(",") if v.strip()]
     run_sync(rows, args.run_id, vendors=vendors, seed=args.seed, limit=args.limit,
-             reps=args.reps, out_root=args.out_root, rpm=args.rpm, max_cost_usd=args.max_cost,
-             dataset_version=_dataset_version(args.dataset))
+             reps=args.reps, out_root=args.out_root, concurrency=args.concurrency,
+             max_cost_usd=args.max_cost, dataset_version=_dataset_version(args.dataset))
 
 
 if __name__ == "__main__":
