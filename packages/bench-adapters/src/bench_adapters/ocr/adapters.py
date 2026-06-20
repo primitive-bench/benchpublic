@@ -284,7 +284,7 @@ class GeminiOCR(_VisionOCRAdapter):
     """Google Gemini vision via the generateContent REST API."""
 
     vendor = "google"
-    model_version = os.environ.get("GEMINI_OCR_MODEL", "gemini-3.1-pro")
+    model_version = os.environ.get("GEMINI_OCR_MODEL", "gemini-3.1-pro-preview")
     env_names = ("GEMINI_API_KEY", "GOOGLE_API_KEY")
 
     def _transcribe(self, key: str, b64: str, mime: str, max_tokens: int) -> _VLM:

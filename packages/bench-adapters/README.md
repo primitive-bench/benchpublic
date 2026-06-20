@@ -76,7 +76,7 @@ needs a code change; the resolved ID is recorded in the run manifest.
 | `tesseract` | Tesseract (local, sentinel) | system `tesseract` binary (`brew install tesseract`) | — |
 | `claude-opus-ocr` | Anthropic (SDK) | `ANTHROPIC_API_KEY` | `CLAUDE_OCR_MODEL` (`claude-opus-4-8`) |
 | `gpt-ocr` | OpenAI (reasoning model) | `OPENAI_API_KEY` | `GPT_OCR_MODEL` (`gpt-5.5`) |
-| `gemini-ocr` | Google | `GEMINI_API_KEY` / `GOOGLE_API_KEY` | `GEMINI_OCR_MODEL` (`gemini-3.1-pro`) |
+| `gemini-ocr` | Google | `GEMINI_API_KEY` / `GOOGLE_API_KEY` | `GEMINI_OCR_MODEL` (`gemini-3.1-pro-preview`) |
 | `mistral-ocr` | Mistral (dedicated OCR API) | `MISTRAL_API_KEY` | `MISTRAL_OCR_MODEL` (`mistral-ocr-2512`) |
 | `deepseek-ocr` | DeepSeek-OCR (self-host) | `DEEPSEEK_OCR_BASE_URL` (vLLM/Ollama OpenAI-compatible endpoint) | `DEEPSEEK_OCR_MODEL` (`deepseek-ocr`) |
 
