@@ -14,7 +14,7 @@ import platform
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from importlib.metadata import PackageNotFoundError, version as _pkg_version
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
 from bench_adapters import get, registry
 from bench_adapters.retrieval import VendorUnavailable
@@ -101,30 +101,36 @@ def _manifest(run_id: str, seed: int, specs: list[AdapterSpec], notes: str,
 
 
 def _invoke_lane(
-    name: str, adapter: Any, items: list[dict[str, Any]], concurrency: int,
-) -> list[tuple[dict[str, Any], dict[str, Any]]] | None:
-    """Invoke `adapter` over every item -> ordered [(item, raw), ...], or None if the
-    lane is unavailable (missing key/dep) and should be skipped uncharged.
+    name: str,
+    adapter: Any,
+    items: list[dict[str, Any]],
+    concurrency: int,
+    on_result: Callable[[dict[str, Any], dict[str, Any]], None],
+) -> bool:
+    """Invoke `adapter` over every item, calling `on_result(item, raw)` per item in
+    item order as results arrive (streamed). Returns False if the lane is unavailable
+    (missing key/dep) and should be skipped uncharged.
 
     We probe the first item synchronously so a `VendorUnavailable` skips the whole
     lane cleanly. The remaining items run on a thread pool for I/O-bound hosted
     adapters (`concurrency` in-flight `invoke` calls); local bi-encoders are CPU-bound
     (torch already uses every core), so they stay sequential. `ThreadPoolExecutor.map`
-    preserves input order, so `items.jsonl` is deterministic regardless of concurrency.
+    yields in input order, so each result is scored + streamed to `items.jsonl` as it
+    lands — deterministic, and crash-safe (a failure mid-lane keeps finished work).
     """
     if not items:
-        return []
+        return False
     try:
         first_raw = adapter.invoke(items[0])
     except VendorUnavailable as exc:
         print(f"[retrieval] {name} unavailable, skipping lane (uncharged): {exc}")
-        return None
+        return False
     except Exception as exc:  # terminal per-item error -> recorded, uncharged
         first_raw = {"error": repr(exc)[:200]}
-    out: list[tuple[dict[str, Any], dict[str, Any]]] = [(items[0], first_raw)]
+    on_result(items[0], first_raw)
     rest = items[1:]
     if not rest:
-        return out
+        return True
 
     def _one(it: dict[str, Any]) -> dict[str, Any]:
         try:
@@ -134,11 +140,13 @@ def _invoke_lane(
 
     workers = 1 if getattr(adapter, "vendor", "") == "local" else max(1, concurrency)
     if workers == 1:
-        out.extend((it, _one(it)) for it in rest)
+        for it in rest:
+            on_result(it, _one(it))
     else:
         with ThreadPoolExecutor(max_workers=workers) as ex:
-            out.extend(zip(rest, ex.map(_one, rest)))
-    return out
+            for it, raw in zip(rest, ex.map(_one, rest)):
+                on_result(it, raw)
+    return True
 
 
 def run_sync(
@@ -174,15 +182,14 @@ def run_sync(
     for name in names:
         spec = _spec(name)
         adapter = get(name)(spec)
-        lane = _invoke_lane(name, adapter, items, concurrency)
-        if lane is None:  # vendor unavailable -> uncharged, no spec recorded
-            continue
-        for it, raw in lane:
+
+        def _on_result(it: dict[str, Any], raw: dict[str, Any], _name: str = name) -> None:
             out = scorer.score(it, raw)
-            rec = _item_result(run_id, name, it, out, raw)
-            rundir.append_item(rec)
+            rec = _item_result(run_id, _name, it, out, raw)
+            rundir.append_item(rec)   # stream to items.jsonl as each result lands
             all_records.append(rec)
-        if lane:
+
+        if _invoke_lane(name, adapter, items, concurrency, _on_result):
             specs.append(spec)
 
     spent = run_cost(all_records)

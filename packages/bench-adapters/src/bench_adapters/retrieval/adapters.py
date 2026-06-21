@@ -20,7 +20,6 @@ inside a vendor's free tier — so the leaderboard's cost dimension stays honest
 """
 from __future__ import annotations
 
-import math
 import os
 import time
 from typing import Any
@@ -31,6 +30,10 @@ from bench_adapters.registry import Adapter, register
 from bench_adapters.retrieval import pricing
 
 EMBED_TIMEOUT = 60.0
+_RETRY_STATUS = frozenset({429, 500, 502, 503, 529})  # transient throttling / upstream errors
+_MAX_RETRIES = 6
+_BACKOFF_CAP = 30.0  # seconds
+_MAX_BATCH = 96  # max inputs per embed call (Cohere /v2/embed hard limit; also caps token burst)
 
 
 class VendorUnavailable(Exception):
@@ -57,19 +60,21 @@ def _candidates(item: dict[str, Any]) -> list[dict[str, Any]]:
     return list(item.get("candidates") or [])
 
 
-def _cosine_rank(qvec: list[float], dvecs: list[list[float]]) -> list[int]:
-    """Indices of `dvecs` sorted by descending cosine similarity to `qvec`.
+def _cosine_rank(qvec: Any, dvecs: Any) -> list[int]:
+    """Indices of `dvecs` (a 2-D array/list) sorted by descending cosine similarity to
+    `qvec`. numpy is imported lazily so `import bench_adapters` stays safe on a minimal
+    install, but the ranking itself is vectorized — a per-item pure-Python loop over a
+    ~100-doc pool was the dominant cost in the local lane."""
+    import numpy as np
 
-    Pure-Python (no numpy import at module load, so `import bench_adapters` stays safe
-    on a minimal install); a ~100-candidate pool of a few-hundred dims is trivial."""
-    qn = math.sqrt(sum(x * x for x in qvec)) or 1e-12
-    sims: list[tuple[float, int]] = []
-    for i, d in enumerate(dvecs):
-        dot = sum(a * b for a, b in zip(qvec, d))
-        dn = math.sqrt(sum(x * x for x in d)) or 1e-12
-        sims.append((dot / (qn * dn), i))
-    sims.sort(key=lambda t: -t[0])
-    return [i for _s, i in sims]
+    q = np.asarray(qvec, dtype=np.float32)
+    d = np.asarray(dvecs, dtype=np.float32)
+    if d.ndim != 2 or d.shape[0] == 0:
+        return []
+    q = q / (np.linalg.norm(q) + 1e-12)
+    d = d / (np.linalg.norm(d, axis=1, keepdims=True) + 1e-12)
+    sims = d @ q
+    return np.argsort(-sims, kind="stable").tolist()
 
 
 class _RetrievalAdapter(Adapter):
@@ -136,10 +141,14 @@ class _LocalBiEncoder(_RetrievalAdapter):
         if not candidates:
             return [], 0.0
         model = self._load()
-        qvec = model.encode([self.query_prefix + query], normalize_embeddings=True)[0].tolist()
-        docs = [self.doc_prefix + str(c.get("text", "")) for c in candidates]
-        dvecs = [v.tolist() for v in model.encode(docs, normalize_embeddings=True)]
-        order = _cosine_rank(qvec, dvecs)
+        # Encode the query + every candidate in ONE batched call (query/passage prefixes
+        # preserved), keep the result as a numpy array, and rank vectorized. The previous
+        # two-calls-plus-pure-Python-cosine path was ~0.9 items/s (overhead-bound) on MPS.
+        texts = [self.query_prefix + query]
+        texts += [self.doc_prefix + str(c.get("text", "")) for c in candidates]
+        emb = model.encode(texts, normalize_embeddings=True, convert_to_numpy=True,
+                           batch_size=128)
+        order = _cosine_rank(emb[0], emb[1:])
         return [str(candidates[i]["id"]) for i in order], 0.0
 
 
@@ -189,12 +198,36 @@ class _ApiEmbedder(_RetrievalAdapter):
         raise NotImplementedError
 
     def _embed(self, texts: list[str], *, is_query: bool, key: str) -> tuple[list[list[float]], int]:
-        with httpx.Client(timeout=EMBED_TIMEOUT) as client:
-            r = client.post(self.endpoint, headers=self._headers(key),
-                            json=self._payload(texts, is_query=is_query))
+        # Chunk to <= _MAX_BATCH inputs per call. Cohere's /v2/embed rejects >96 inputs
+        # with a 400, and a big batch is also a larger token burst against per-minute
+        # rate limits — so a per-query pool of ~100 docs must be split, not sent whole.
+        vecs: list[list[float]] = []
+        tokens = 0
+        for i in range(0, len(texts), _MAX_BATCH):
+            v, t = self._embed_batch(texts[i:i + _MAX_BATCH], is_query=is_query, key=key)
+            vecs.extend(v)
+            tokens += t
+        return vecs, tokens
+
+    def _embed_batch(self, texts: list[str], *, is_query: bool, key: str) -> tuple[list[list[float]], int]:
+        # Retry transient throttling/5xx with exponential backoff (honoring Retry-After),
+        # so a rate-limited lane degrades to "slower" rather than "mostly errored".
+        payload = self._payload(texts, is_query=is_query)
+        last: httpx.HTTPStatusError | None = None
+        for attempt in range(_MAX_RETRIES):
+            with httpx.Client(timeout=EMBED_TIMEOUT) as client:
+                r = client.post(self.endpoint, headers=self._headers(key), json=payload)
+            if r.status_code in _RETRY_STATUS and attempt < _MAX_RETRIES - 1:
+                retry_after = r.headers.get("retry-after")
+                wait = float(retry_after) if (retry_after or "").replace(".", "", 1).isdigit() \
+                    else min(_BACKOFF_CAP, 2.0 ** attempt)
+                time.sleep(wait)
+                last = httpx.HTTPStatusError(f"{r.status_code}", request=r.request, response=r)
+                continue
             r.raise_for_status()
-            data = r.json()
-        return self._parse(data)
+            return self._parse(r.json())
+        assert last is not None
+        raise last
 
     def retrieve(self, query: str, candidates: list[dict[str, Any]]) -> tuple[list[str], float]:
         if not candidates:
